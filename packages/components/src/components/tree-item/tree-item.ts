@@ -122,17 +122,17 @@ export default class CsTreeItem extends CornerstoneElement {
     this.setAttribute('role', 'treeitem');
     this.setAttribute('tabIndex', this.tabIndex.toString());
 
-    // TODO: Because the parent influences the child, we should be able to handle this in SSR with a custom renderer.
     if (this.isNestedItem()) {
       this.setAttribute('slot', 'children');
-      if (!this._parentTreeContext?.expanded) {
-        this.expanded = false;
-      }
     }
 
-    if (this._parentTreeContext) {
-      this._treeItemContext = { depth: this._parentTreeContext.depth + 1, expanded: this.expanded };
-    }
+    // The item keeps its own `expanded` value wherever it connects. A nested item under a collapsed parent is hidden by
+    // the parent's children container, so it does not need to collapse itself, and forcing it to do so lost its state
+    // on every move. The context is built here, not in the field initializer, because attributes are not read yet then.
+    this._treeItemContext = {
+      depth: this._parentTreeContext ? this._parentTreeContext.depth + 1 : 0,
+      expanded: this.expanded,
+    };
 
     this.updateIndentation();
   }
@@ -209,7 +209,22 @@ export default class CsTreeItem extends CornerstoneElement {
       this.indeterminate = false;
     }
 
+    if (changedProperties.has('expanded') && this._treeItemContext.expanded !== this.expanded) {
+      this._treeItemContext = { ...this._treeItemContext, expanded: this.expanded };
+    }
+
     super.willUpdate(changedProperties);
+  }
+
+  protected updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    // Start the animation after the update, not in a watcher before it, so that `cs-expand` and `cs-collapse` fire
+    // once the `expanded` attribute, `aria-expanded` and the `expanded` custom state all match the property. The
+    // previous value is `undefined` only on the first update, which `firstUpdated()` handles without animating.
+    if (changedProperties.has('expanded') && changedProperties.get('expanded') !== undefined) {
+      this.handleExpandAnimation();
+    }
   }
 
   private async animateExpand(generation: number) {
@@ -280,7 +295,6 @@ export default class CsTreeItem extends CornerstoneElement {
     }
   }
 
-  @watch('expanded', { waitUntilFirstUpdate: true })
   handleExpandAnimation() {
     this.animationGeneration++;
     const generation = this.animationGeneration;

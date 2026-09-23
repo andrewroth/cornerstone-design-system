@@ -202,6 +202,115 @@ describe('<cs-tree-item>', () => {
         });
       });
 
+      describe('nested expanded state', () => {
+        const childrenOf = (item: CsTreeItem) => item.shadowRoot!.querySelector<HTMLElement>('.children')!;
+
+        const expectExpanded = (item: CsTreeItem) => {
+          expect(item.expanded).to.be.true;
+          expect(item).to.have.attribute('expanded');
+          expect(item).to.have.attribute('aria-expanded', 'true');
+          expect(childrenOf(item).hidden).to.be.false;
+        };
+
+        let root: CsTreeItem;
+        let first: CsTreeItem;
+        let second: CsTreeItem;
+
+        beforeEach(async () => {
+          root = await fixture<CsTreeItem>(html`
+            <cs-tree-item expanded>
+              Root
+              <cs-tree-item id="first" expanded>
+                First
+                <cs-tree-item>First - 1</cs-tree-item>
+              </cs-tree-item>
+              <cs-tree-item id="second">
+                Second
+                <cs-tree-item>Second - 1</cs-tree-item>
+              </cs-tree-item>
+            </cs-tree-item>
+          `);
+          first = root.querySelector<CsTreeItem>('#first')!;
+          second = root.querySelector<CsTreeItem>('#second')!;
+          await Promise.all([first.updateComplete, second.updateComplete]);
+        });
+
+        it('should keep a nested item expanded when it renders expanded under an expanded parent', () => {
+          expectExpanded(root);
+          expectExpanded(first);
+        });
+
+        it('should keep a nested item expanded when it is moved among its siblings', async () => {
+          const collapseSpy = sinon.spy();
+          first.addEventListener('cs-collapse', collapseSpy);
+
+          root.append(first);
+          await first.updateComplete;
+
+          expectExpanded(first);
+          expect(collapseSpy).not.to.have.been.called;
+        });
+
+        it('should keep a nested item expanded when it is moved under a collapsed parent', async () => {
+          second.append(first);
+          await first.updateComplete;
+
+          expect(second.expanded).to.be.false;
+          expectExpanded(first);
+        });
+
+        it('should keep a new nested item expanded when its parent was expanded after it rendered', async () => {
+          const parent = await fixture<CsTreeItem>(html`
+            <cs-tree-item>
+              Parent
+              <cs-tree-item>Child</cs-tree-item>
+            </cs-tree-item>
+          `);
+          parent.expanded = true;
+          await oneEvent(parent, 'cs-after-expand');
+
+          const added = document.createElement('cs-tree-item');
+          added.expanded = true;
+          added.append('Added', document.createElement('cs-tree-item'));
+          parent.append(added);
+          await added.updateComplete;
+
+          expectExpanded(added);
+        });
+      });
+
+      describe('state when events fire', () => {
+        const snapshot = (item: CsTreeItem) => ({
+          property: item.expanded,
+          attribute: item.hasAttribute('expanded'),
+          ariaExpanded: item.getAttribute('aria-expanded'),
+          customState: item.customStates.has('expanded'),
+        });
+
+        it('should reflect expanded to the attribute before cs-expand fires', async () => {
+          let seen: ReturnType<typeof snapshot> | undefined;
+          parentItem.addEventListener('cs-expand', () => (seen = snapshot(parentItem)), { once: true });
+
+          parentItem.expanded = true;
+          await oneEvent(parentItem, 'cs-after-expand');
+
+          expect(seen).to.deep.equal({ property: true, attribute: true, ariaExpanded: 'true', customState: true });
+        });
+
+        it('should remove the expanded attribute before cs-collapse fires', async () => {
+          parentItem.expanded = true;
+          await oneEvent(parentItem, 'cs-after-expand');
+
+          let seen: ReturnType<typeof snapshot> | undefined;
+          parentItem.addEventListener('cs-collapse', () => (seen = snapshot(parentItem)), { once: true });
+
+          parentItem.expanded = false;
+          await oneEvent(parentItem, 'cs-after-collapse');
+
+          expect(seen).to.deep.equal({ property: false, attribute: false, ariaExpanded: 'false', customState: false });
+        });
+      });
+
       describe('animation interruption', () => {
         it('should keep children visible when collapse is interrupted by expand', async () => {
           parentItem.expanded = true;

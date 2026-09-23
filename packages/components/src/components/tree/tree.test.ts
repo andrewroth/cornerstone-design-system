@@ -107,6 +107,34 @@ describe('<cs-tree>', () => {
         });
       });
 
+      describe('nested expanded items', () => {
+        it('should render every item marked expanded as expanded', async () => {
+          const tree = await fixture<CsTree>(html`
+            <cs-tree>
+              <cs-tree-item expanded>
+                Level 1
+                <cs-tree-item expanded>
+                  Level 2
+                  <cs-tree-item expanded>
+                    Level 3
+                    <cs-tree-item>Level 4</cs-tree-item>
+                  </cs-tree-item>
+                </cs-tree-item>
+              </cs-tree-item>
+            </cs-tree>
+          `);
+          const branches = [...tree.querySelectorAll<CsTreeItem>('cs-tree-item[expanded]')];
+          await Promise.all(branches.map((item) => item.updateComplete));
+
+          expect(branches).to.have.lengthOf(3);
+          for (const item of branches) {
+            expect(item.expanded).to.be.true;
+            expect(item).to.have.attribute('aria-expanded', 'true');
+          }
+          expect(tree.getFocusableItems()).to.have.lengthOf(4);
+        });
+      });
+
       describe('slots', () => {
         it('should render the default slot', () => {
           const items = el.querySelectorAll('cs-tree-item');

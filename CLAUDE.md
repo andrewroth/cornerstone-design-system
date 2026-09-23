@@ -4,8 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Layout
 
-An npm workspace of four packages. Root scripts fan out across all of them; per-package scripts do
-one package's work.
+An npm workspace of four packages, plus a Ruby gem beside them. Root scripts fan out across the npm
+packages; per-package scripts do one package's work.
 
 |                        |                                        |                                                                         |
 | ---------------------- | -------------------------------------- | ----------------------------------------------------------------------- |
@@ -13,6 +13,7 @@ one package's work.
 | `packages/components`  | `@cruglobal/cornerstone-components`    | the component library — published, public                               |
 | `packages/docs`        | —                                      | the Astro documentation site — deploys to GitHub Pages, never published |
 | `packages/build-tools` | —                                      | modules the library and the docs share — private, never published       |
+| `packages/rails`       | `cornerstone-rails` (Ruby gem)         | Rails engine serving the component library — not an npm package         |
 
 Paths in this file are relative to `packages/tokens` unless stated otherwise.
 

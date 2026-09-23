@@ -4,6 +4,8 @@ class PagesController < ApplicationController
   def home; end
   def form; end
   def other; end
+  def plain; end
+  def tree; end
 
   def echo
     render plain: request.query_parameters.except("controller", "action").to_json

@@ -26,11 +26,14 @@ module CornerstoneRails
   #   color_scheme  :light, :dark or :auto (:light)
   #   cloak         add cs-cloak to <html> for the first page load (true)
   #   turbo         load the Turbo Drive and morph handling (true)
+  #   native        load styles/native.css, the styles for plain HTML elements (true)
+  #   eager         load the library on every page, not only once it has a cs-* element (false)
   def self.config
     @config ||= begin
       require "active_support/ordered_options"
       ActiveSupport::OrderedOptions.new.merge!(
-        path_prefix: "/cornerstone", theme: :cru, color_scheme: :light, cloak: true, turbo: true
+        path_prefix: "/cornerstone", theme: :cru, color_scheme: :light, cloak: true, turbo: true,
+        native: true, eager: false
       )
     end
   end

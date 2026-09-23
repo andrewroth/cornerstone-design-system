@@ -8,16 +8,41 @@ class HelperTest < ActionView::TestCase
   setup { @config = CornerstoneRails.config.dup }
   teardown { CornerstoneRails.config.merge!(@config) }
 
-  test "head tags load the stylesheet, the Turbo handling and then the loader from the versioned path" do
-    html = cornerstone_head_tags
-    base = "/cornerstone/#{CornerstoneRails::COMPONENTS_VERSION}"
+  BASE = "/cornerstone/#{CornerstoneRails::COMPONENTS_VERSION}".freeze
 
-    assert_includes html, %(<link rel="stylesheet" href="#{base}/styles/cornerstone.css" data-turbo-track="reload" />)
-    assert_includes html, %(<script src="#{base}/#{CornerstoneRails.glue_filename}" type="module" data-turbo-track="reload"></script>)
-    assert_includes html, %(<script src="#{base}/cornerstone.loader.js" type="module" data-turbo-track="reload"></script>)
-    assert_operator html.index(CornerstoneRails.glue_filename), :<, html.index("cornerstone.loader.js")
+  test "head tags load the stylesheet and the gem's module, which loads the library on demand" do
+    html = cornerstone_head_tags
+
+    assert_includes html, %(<link rel="stylesheet" href="#{BASE}/styles/cornerstone.css" data-turbo-track="reload" />)
+    assert_includes html, %(<script src="#{BASE}/#{CornerstoneRails.glue_filename}" type="module" data-turbo-track="reload"></script>)
+    refute_includes html, "cornerstone.loader.js", "lazy by default: the gem's module imports the loader"
     refute_includes html, "themes/", "the default stylesheet already imports the cru theme"
     refute_includes html, "prefers-color-scheme"
+  end
+
+  test "eager: true also links the loader, after the gem's module" do
+    html = cornerstone_head_tags(eager: true)
+    assert_includes html, %(<script src="#{BASE}/cornerstone.loader.js" type="module" data-turbo-track="reload"></script>)
+    assert_operator html.index(CornerstoneRails.glue_filename), :<, html.index("cornerstone.loader.js")
+
+    CornerstoneRails.config.eager = true
+    assert_includes cornerstone_head_tags, "cornerstone.loader.js"
+  end
+
+  test "native: false links layers, utilities and the theme instead of cornerstone.css" do
+    links = cornerstone_head_tags(native: false).scan(/href="([^"]+)"/).flatten
+    assert_equal %W[#{BASE}/styles/layers.css #{BASE}/styles/utilities.css #{BASE}/styles/themes/cru.css], links
+
+    CornerstoneRails.config.native = false
+    CornerstoneRails.config.theme = :default
+    links = cornerstone_head_tags.scan(/href="([^"]+)"/).flatten
+    assert_equal %W[#{BASE}/styles/layers.css #{BASE}/styles/utilities.css #{BASE}/styles/themes/default.css], links
+  end
+
+  test "the native: false stylesheets are what cornerstone.css imports, minus native.css" do
+    imports = File.read(File.join(CornerstoneRails::VENDOR_DIR, "styles", "cornerstone.css")).scan(/@import url\('([^']+)'\)/).flatten
+    assert_equal %w[layers.css native.css utilities.css themes/cru.css], imports
+    assert_equal (imports - ["native.css"]).map { "styles/#{_1}" }, CornerstoneRails::Helper.stylesheets(:cru, native: false)
   end
 
   test "a theme the default stylesheet does not import gets its own link" do
@@ -34,8 +59,8 @@ class HelperTest < ActionView::TestCase
     assert_equal "cs-theme-cru cs-cloak", cornerstone_html_class(color_scheme: :auto)
   end
 
-  test "turbo: false leaves out the Turbo handling" do
-    refute_includes cornerstone_head_tags(turbo: false), "cornerstone-rails-"
+  test "turbo: false tells the gem's module to leave out the Turbo handling" do
+    assert_includes cornerstone_head_tags(turbo: false), %(src="#{BASE}/#{CornerstoneRails.glue_filename}?turbo=0")
   end
 
   test "html class reflects the configuration" do
@@ -51,9 +76,9 @@ class HelperTest < ActionView::TestCase
     assert_equal "/vendor/cs/#{CornerstoneRails::COMPONENTS_VERSION}/cornerstone.js", cornerstone_asset_path("cornerstone.js")
   end
 
-  test "cs_tag prefixes and dasherizes, and renders booleans as HTML does" do
-    html = cs_tag(:tree_item, "Docs", expanded: true, disabled: false, lazy: nil, with_clear: true, data: { id: 4 }, aria: { current: "page" }, class: %w[a b])
-    assert_dom_equal %(<cs-tree-item expanded="" with-clear="" data-id="4" aria-current="page" class="a b">Docs</cs-tree-item>), html
+  test "cs_tag prefixes and dasherizes, and renders true as name=\"name\" for every boolean" do
+    html = cs_tag(:tree_item, "Docs", expanded: true, selected: true, disabled: false, lazy: nil, with_clear: true, data: { id: 4 }, aria: { current: "page" }, class: %w[a b])
+    assert_dom_equal %(<cs-tree-item expanded="expanded" selected="selected" with-clear="with-clear" data-id="4" aria-current="page" class="a b">Docs</cs-tree-item>), html
     assert_dom_equal %(<cs-card></cs-card>), cs_tag("cs-card")
   end
 
@@ -70,13 +95,13 @@ class HelperTest < ActionView::TestCase
 
   test "cs_icon, cs_badge and cs_callout" do
     assert_dom_equal %(<cs-icon name="check_circle" label="Done"></cs-icon>), cs_icon("check_circle", label: "Done")
-    assert_dom_equal %(<cs-badge variant="success" pill="">New</cs-badge>), cs_badge("New", variant: :success, pill: true)
+    assert_dom_equal %(<cs-badge variant="success" pill="pill">New</cs-badge>), cs_badge("New", variant: :success, pill: true)
     assert_dom_equal %(<cs-callout variant="warning"><cs-icon name="warning" slot="icon"></cs-icon>Careful</cs-callout>),
                      cs_callout("Careful", variant: :warning, icon: "warning")
   end
 
   test "cs_dialog puts footer: in the footer slot" do
-    assert_dom_equal %(<cs-dialog label="Delete?" light-dismiss="">Gone for good.<div slot="footer"><cs-button variant="danger">Delete</cs-button></div></cs-dialog>),
+    assert_dom_equal %(<cs-dialog label="Delete?" light-dismiss="light-dismiss">Gone for good.<div slot="footer"><cs-button variant="danger">Delete</cs-button></div></cs-dialog>),
                      cs_dialog("Gone for good.", label: "Delete?", light_dismiss: true, footer: cs_button("Delete", variant: :danger))
   end
 
@@ -91,7 +116,7 @@ class HelperTest < ActionView::TestCase
 
   test "cs_tree and cs_tree_item nest" do
     html = cs_tree(selection: :leaf) { cs_tree_item("Docs", expanded: true) { cs_tree_item("a.txt") } }
-    assert_dom_equal %(<cs-tree selection="leaf"><cs-tree-item expanded="">Docs<cs-tree-item>a.txt</cs-tree-item></cs-tree-item></cs-tree>), html
+    assert_dom_equal %(<cs-tree selection="leaf"><cs-tree-item expanded="expanded">Docs<cs-tree-item>a.txt</cs-tree-item></cs-tree-item></cs-tree>), html
   end
 
   test "cs_split_panel wraps two panes in their slots, or renders a block as-is" do

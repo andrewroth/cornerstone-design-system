@@ -8,7 +8,7 @@ module CornerstoneRails
   # The layout helpers put Cornerstone Components on the page. The cs_* helpers are thin: each one
   # renders a single cs-* element, passing every other option through as an attribute. Keyword
   # names are dasherized (`with_clear: true` becomes `with-clear`), `true` renders the attribute
-  # present and empty, and `false` or `nil` leaves it out. `data:` and `aria:` hashes, and `class:`
+  # with its own name as the value (`with-clear="with-clear"`), and `false` or `nil` leaves it out. `data:` and `aria:` hashes, and `class:`
   # arrays, behave as they do in `tag`.
   module Helper
     # Keeps a second copy of the listener out if Turbo re-runs this script after a Drive visit.
@@ -25,28 +25,36 @@ module CornerstoneRails
 
     # -- Layout ----------------------------------------------------------------------------------
 
-    # Everything Cornerstone Components needs in <head>: the stylesheet, the theme stylesheet when
-    # the default one does not already import it, the color-scheme script for :auto, the Turbo
-    # handling, and the autoloader. Defaults come from `config.cornerstone`.
+    # Everything Cornerstone Components needs in <head>: the stylesheets, the color-scheme script
+    # for :auto, and the gem's module, which imports the library the first time the page has a
+    # cs-* element and handles Turbo. Defaults come from `config.cornerstone`.
     #
     #   <%= cornerstone_head_tags %>
-    #   <%= cornerstone_head_tags theme: :default, color_scheme: :auto, turbo: false %>
-    def cornerstone_head_tags(theme: nil, color_scheme: nil, turbo: nil)
+    #   <%= cornerstone_head_tags theme: :default, color_scheme: :auto, native: false %>
+    #
+    # native: false leaves out styles/native.css, Cornerstone's styles for plain HTML elements
+    # (<button>, <a>, <details>, body text), for an app that styles those itself. It links
+    # layers.css, utilities.css and the theme instead of cornerstone.css, which imports all four.
+    #
+    # eager: true also links cornerstone.loader.js, so the library loads on every page.
+    def cornerstone_head_tags(theme: nil, color_scheme: nil, turbo: nil, native: nil, eager: nil)
       theme = cornerstone_theme(theme)
       color_scheme = cornerstone_color_scheme(color_scheme)
       turbo = CornerstoneRails.config.turbo if turbo.nil?
+      native = CornerstoneRails.config.native if native.nil?
+      eager = CornerstoneRails.config.eager if eager.nil?
       track = { "data-turbo-track": "reload" }
 
-      tags = [stylesheet_link_tag(cornerstone_asset_path("styles/cornerstone.css"), **track)]
-      unless CornerstoneRails::Helper.imported_by_default?(theme)
-        tags << stylesheet_link_tag(cornerstone_asset_path("styles/themes/#{theme}.css"), **track)
+      tags = CornerstoneRails::Helper.stylesheets(theme, native: native).map do |path|
+        stylesheet_link_tag(cornerstone_asset_path(path), **track)
       end
       tags << javascript_tag(AUTO_COLOR_SCHEME_JS, **cornerstone_nonce) if color_scheme == :auto
-      # Before the loader, so the Turbo handling records the page before any component upgrades.
-      if turbo
-        tags << javascript_include_tag(cornerstone_asset_path(CornerstoneRails.glue_filename), type: "module", **cornerstone_nonce, **track)
-      end
-      tags << javascript_include_tag(cornerstone_asset_path("cornerstone.loader.js"), type: "module", **cornerstone_nonce, **track)
+      # One module does both jobs. It must run before the library, so the morph handling records
+      # the page before any component upgrades and writes its own attributes.
+      glue = cornerstone_asset_path(CornerstoneRails.glue_filename)
+      glue += "?turbo=0" unless turbo
+      tags << javascript_include_tag(glue, type: "module", **cornerstone_nonce, **track)
+      tags << javascript_include_tag(cornerstone_asset_path("cornerstone.loader.js"), type: "module", **cornerstone_nonce, **track) if eager
       safe_join(tags, "\n")
     end
 
@@ -161,6 +169,19 @@ module CornerstoneRails
 
     # -- Internals -------------------------------------------------------------------------------
 
+    # The stylesheets cornerstone_head_tags links, as paths under the served library.
+    #
+    #   native: true   styles/cornerstone.css (layers, native, utilities and the Cru theme), plus
+    #                  the theme's own file when cornerstone.css does not import it
+    #   native: false  styles/layers.css, styles/utilities.css and styles/themes/<theme>.css
+    def self.stylesheets(theme, native: true)
+      if native
+        ["styles/cornerstone.css", *("styles/themes/#{theme}.css" unless imported_by_default?(theme))]
+      else
+        ["styles/layers.css", "styles/utilities.css", "styles/themes/#{theme}.css"]
+      end
+    end
+
     def self.imported_by_default?(theme)
       @default_imports ||= File.read(File.join(CornerstoneRails::VENDOR_DIR, "styles", "cornerstone.css"))
       @default_imports.match?(%r{@import url\(['"]?themes/#{Regexp.escape(theme.to_s)}\.css})
@@ -180,7 +201,9 @@ module CornerstoneRails
         if %w[data aria].include?(name) || name == "class"
           result[key] = value
         elsif value == true
-          result[name] = ""
+          # name="name", the form Rails' tag builder already uses for the HTML booleans it knows
+          # (selected, disabled, checked, open, ...), so every boolean renders the same way.
+          result[name] = name
         elsif value.nil? || value == false
           next
         else

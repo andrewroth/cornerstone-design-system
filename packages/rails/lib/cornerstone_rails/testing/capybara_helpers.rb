@@ -5,7 +5,7 @@ require "xpath"
 
 module CornerstoneRails
   module Testing
-    # Capybara helpers for Cornerstone Components form controls.
+    # Capybara helpers for Cornerstone Components: form controls, cs-tree and cs-split-panel.
     #
     # A cs-* control keeps its native <input> inside a shadow root, where Capybara's fill_in,
     # check and select cannot see it. These helpers find the host element in the light DOM, then
@@ -88,6 +88,112 @@ module CornerstoneRails
         host.evaluate_script("['cs-checkbox', 'cs-switch'].includes(this.localName) ? this.checked : this.value")
       end
 
+      # -- cs-tree ---------------------------------------------------------------------------------
+      #
+      # A tree item's locator is its id, its aria-label, or the text of its own label: a text node
+      # directly inside the item, or any element in its label whose whole text is the locator (so
+      # `<cs-tree-item><a href="...">Ohio Valley</a> ...</cs-tree-item>` matches "Ohio Valley").
+      # Text inside a nested cs-tree-item belongs to that item. As with Capybara's finders, an item
+      # inside a collapsed branch is not visible; expand the branch first, or pass `visible: :all`
+      # to the assertions.
+
+      # Finds a cs-tree-item.
+      def cs_find_tree_item(locator, **options)
+        find(:xpath, cs_tree_item_xpath(locator), **options)
+      end
+
+      # Opens a branch by clicking its expand button. Does nothing if it is already open.
+      #
+      #   cs_expand_tree_item "Documents"
+      def cs_expand_tree_item(locator, **options)
+        cs_toggle_tree_item(locator, true, **options)
+      end
+
+      # Closes a branch by clicking its expand button. Does nothing if it is already closed.
+      def cs_collapse_tree_item(locator, **options)
+        cs_toggle_tree_item(locator, false, **options)
+      end
+
+      # Selects an item by clicking its label, as a user would. Does nothing if it is already
+      # selected. What a click does depends on the tree's `selection`: in "leaf" mode a click on a
+      # branch opens or closes it instead, and in the multiple modes a click toggles.
+      #
+      #   cs_select_tree_item "notes.txt"
+      def cs_select_tree_item(locator, **options)
+        item = cs_find_tree_item(locator, **options)
+        cs_wait_for_upgrade(item)
+        return item if item.evaluate_script("this.selected")
+
+        # A click on the label's <slot> itself is refused by WebDriver (the point belongs to the
+        # slotted light DOM), so click the host at the centre of its label, where a user would.
+        dx, dy = item.evaluate_script(<<~JS)
+          (() => {
+            const label = this.shadowRoot.querySelector('[part~=label]').getBoundingClientRect();
+            const host = this.getBoundingClientRect();
+            return [label.left + label.width / 2 - (host.left + host.width / 2), label.top + label.height / 2 - (host.top + host.height / 2)];
+          })()
+        JS
+        page.scroll_to(item, align: :center)
+        page.driver.browser.action.move_to(item.native, dx.round, dy.round).click.perform
+        item
+      end
+
+      # Waits for a cs-tree-item to be in the given state, or raises Capybara::ExpectationNotMet.
+      # Works in Minitest and RSpec alike, as Capybara's assert_selector does.
+      #
+      #   assert_cs_tree_item "Documents", expanded: true
+      #   assert_cs_tree_item "notes.txt", selected: true, expanded: false
+      def assert_cs_tree_item(locator, expanded: nil, selected: nil, **options)
+        item = cs_find_tree_item(locator, **options)
+        cs_wait_for_upgrade(item)
+        expected = { "expanded" => expanded, "selected" => selected }.compact
+        item.synchronize(options[:wait]) do
+          actual = item.evaluate_script("({ expanded: this.expanded, selected: this.selected })").slice(*expected.keys)
+          raise Capybara::ExpectationNotMet, "expected tree item #{locator.inspect} to be #{expected}, was #{actual}" unless actual == expected
+        end
+        true
+      end
+
+      # true or false, after waiting as assert_cs_tree_item does.
+      #
+      #   expect(has_cs_tree_item?("Documents", expanded: true)).to be(true)
+      def has_cs_tree_item?(locator, **state)
+        assert_cs_tree_item(locator, **state)
+      rescue Capybara::ExpectationNotMet
+        false
+      end
+
+      # -- cs-split-panel ----------------------------------------------------------------------
+      #
+      # A split panel's locator is its id or aria-label. Leave it out when the page has one.
+
+      # Finds a cs-split-panel.
+      def cs_find_split_panel(locator = nil, **options)
+        panels = XPath.descendant(:"cs-split-panel")
+        panels = panels[XPath.attr(:id).equals(locator.to_s) | XPath.attr(:"aria-label").equals(locator.to_s)] if locator
+        find(:xpath, panels, **options)
+      end
+
+      # Moves the divider to `position`, a percentage of the panel's size from the start. It sets
+      # the component's `position` property, so the panel emits cs-reposition as it does after a
+      # drag.
+      #
+      #   cs_set_split_panel_position 30
+      #   cs_set_split_panel_position 30, "sidebar"
+      def cs_set_split_panel_position(position, locator = nil, **options)
+        panel = cs_find_split_panel(locator, **options)
+        cs_wait_for_upgrade(panel)
+        panel.execute_script("this.position = arguments[0]", position.to_f)
+        panel
+      end
+
+      # The divider's position, a Float percentage of the panel's size from the start.
+      def cs_split_panel_position(locator = nil, **options)
+        panel = cs_find_split_panel(locator, **options)
+        cs_wait_for_upgrade(panel)
+        panel.evaluate_script("this.position").to_f
+      end
+
       # Finds the host element of a cs-* control. `tags` is one tag name or an array of them.
       def cs_find_control(tags, locator, **options)
         tags = Array(tags).map(&:to_s)
@@ -96,6 +202,35 @@ module CornerstoneRails
       end
 
       private
+
+      def cs_toggle_tree_item(locator, state, **options)
+        item = cs_find_tree_item(locator, **options)
+        cs_wait_for_upgrade(item)
+        return item if item.evaluate_script("this.expanded") == state
+
+        raise Capybara::ExpectationNotMet, "tree item #{locator.inspect} has no children to show" if item.evaluate_script("this.isLeaf && !this.lazy")
+
+        item.shadow_root.find(:css, ".expand-button").click
+        item.synchronize do
+          raise Capybara::ExpectationNotMet, "tree item #{locator.inspect} did not #{state ? "expand" : "collapse"}" unless item.evaluate_script("this.expanded") == state
+        end
+        item
+      end
+
+      # Text nodes directly inside an item, and elements in its label (not inside a nested item)
+      # whose whole text is the locator.
+      def cs_tree_item_xpath(locator)
+        literal = cs_xpath_literal(locator.to_s)
+        ".//cs-tree-item[@id=#{literal} or @aria-label=#{literal} or text()[normalize-space(.)=#{literal}]]" \
+          " | .//*[not(self::cs-tree-item)][not(.//cs-tree-item)][normalize-space(.)=#{literal}]/ancestor::cs-tree-item[1]"
+      end
+
+      def cs_xpath_literal(string)
+        return "'#{string}'" unless string.include?("'")
+        return %("#{string}") unless string.include?('"')
+
+        "concat(#{string.split("'", -1).map { |part| "'#{part}'" }.join(%(, "'", ))})"
+      end
 
       def cs_toggle(locator, state, **options)
         host = cs_find_control(%w[cs-checkbox cs-switch], locator, **options)

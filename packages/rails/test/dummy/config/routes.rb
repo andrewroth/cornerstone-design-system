@@ -6,4 +6,6 @@ Rails.application.routes.draw do
   get "echo", to: "pages#echo"
   get "morph", to: "pages#morph"
   get "other", to: "pages#other"
+  get "plain", to: "pages#plain"
+  get "tree", to: "pages#tree"
 end

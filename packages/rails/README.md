@@ -50,21 +50,36 @@ followed the manual setup in the Rails guide, delete that copy.
   </head>
 ```
 
-`cornerstone_head_tags(theme:, color_scheme:, turbo:)` renders, in this order:
+`cornerstone_head_tags(theme:, color_scheme:, turbo:, native:, eager:)` renders, in this order:
 
-- the stylesheet, `styles/cornerstone.css`, which imports the Cru theme;
-- a second stylesheet for any theme `cornerstone.css` does not import;
+- the stylesheets (see below);
 - for `color_scheme: :auto`, a small inline script that sets `cs-dark` or `cs-light` on `<html>` from
   the operating system setting and follows changes to it;
-- the Turbo handling (see below), unless `turbo: false`;
-- the autoloader, `cornerstone.loader.js`, which registers each `cs-*` element as it appears.
+- the gem's module, which loads the library when the page needs it and handles Turbo (see below);
+- with `eager: true` only, the autoloader, `cornerstone.loader.js`, so the library loads on every page.
+
+Which stylesheets it links:
+
+| `native:` | Files |
+| --- | --- |
+| `true` (default) | `styles/cornerstone.css`, which imports `layers.css`, `native.css`, `utilities.css` and `themes/cru.css`; plus `styles/themes/<theme>.css` for a theme it does not import |
+| `false` | `styles/layers.css`, `styles/utilities.css` and `styles/themes/<theme>.css` |
+
+`native.css` styles plain HTML elements: body text, every `<button>`, `<a>`, `<details>`, form field
+and table. Use `native: false` in an app whose own CSS (Tailwind, DaisyUI, Bootstrap) styles those
+elements. The components do not need it: they get their tokens from the theme, and `utilities.css`
+carries the `cs-cloak` rule. In an app with its own cascade layers, render the head tags before the
+app's stylesheet, so Cornerstone's layers are declared first and rank below the app's.
 
 Each stylesheet and script with a URL carries `data-turbo-track="reload"`, so a gem upgrade forces a
 full page load. Scripts get the request's CSP nonce when the app has a content security policy.
 
 `cornerstone_html_class(theme:, color_scheme:, cloak:)` returns the classes for `<html>`, for example
 `"cs-theme-cru cs-light cs-cloak"`. `cs-cloak` hides the page on its first load until its components are
-registered, for two seconds at most; the loader removes it.
+registered, for two seconds at most; the loader removes it. On a page with no `cs-*` element the gem's
+module removes it as soon as it runs, because there is nothing to wait for. The rule hides the page
+while any custom element on it is undefined, not only a `cs-*` one (a `turbo-frame` counts), which is
+why it is removed rather than left to time out.
 
 Both helpers take their defaults from `config.cornerstone`:
 
@@ -74,6 +89,8 @@ Both helpers take their defaults from `config.cornerstone`:
 | `color_scheme` | `:light` | `:light`, `:dark`, `:auto` |
 | `cloak` | `true` | |
 | `turbo` | `true` | |
+| `native` | `true` | `false` leaves out `native.css` |
+| `eager` | `false` | `true` loads the library on every page |
 | `path_prefix` | `"/cornerstone"` | the version is appended |
 
 An unknown theme raises. No FamilyLife theme ships in 0.6.2; when one does, `theme: :familylife` will
@@ -87,8 +104,14 @@ needs a full load (for example, a link with `data-turbo="false"`).
 
 Each helper renders one `cs-*` element. Every option it does not name is passed through as an
 attribute: keyword names are dasherized (`with_clear:` becomes `with-clear`), `true` renders the
-attribute present and empty, and `false` or `nil` leaves it out. `data:`, `aria:` and `class:` behave
-as they do in `tag`. `true` and `false` matter here: `pill="false"` would turn a Lit boolean *on*.
+attribute with its own name as the value (`with-clear="with-clear"`, `selected="selected"`), and
+`false` or `nil` leaves it out. `data:`, `aria:` and `class:` behave as they do in `tag`. `true` and
+`false` matter here: `pill="false"` would turn a Lit boolean *on*.
+
+Rails' tag builder already renders the HTML booleans it knows (`selected`, `disabled`, `checked`,
+`open` and others) as `name="name"`, whatever the value, so the gem renders every boolean that way
+rather than two different ways. HTML allows both forms, and a component reads only whether the
+attribute is there. When a component sets one of these itself, it writes `name=""`.
 
 ```ruby
 cs_tag(name, content = nil, **attributes, &block)  # any element: cs_tag(:card), cs_tag("cs-card")
@@ -145,6 +168,10 @@ of Rails' logger:
   `access-control-allow-origin: *`, so the modules also load from an asset host or CDN
   (`config.asset_host` is honoured).
 - Content types from Rack: `text/javascript` and `text/css`.
+- Compression: most `.js` and `.css` files have a brotli (`.br`) and a gzip (`.gz`) copy beside
+  them. The middleware sends the best one the request's `Accept-Encoding` allows, with
+  `content-encoding` and `vary: accept-encoding`, and the file as is otherwise. Nothing is compressed
+  per request.
 - Only `GET` and `HEAD`. Anything else under the prefix is a 405, and a missing file is a 404 without
   a cache header.
 
@@ -166,19 +193,51 @@ source maps. Nothing in the kept files imports a dropped one; the system tests c
 loads with no failed request.
 
 The vendored files are committed. A gem installed from git runs no build step, so the files must be
-in the repository.
+in the repository. The same goes for the compressed copies, which `rake cornerstone:vendor` writes
+after it copies the files (`rake cornerstone:compress` writes them again on their own): 572 `.br`
+files, 456 KB, and 567 `.gz` files, 542 KB, so about 1 MB more in the repository. A copy is kept only
+when it is smaller than its file. A test fails when a copy is missing for a file over 1 KB or does
+not decompress to its file.
 
 `vendor/cornerstone/manifest.json` records the version, the npm integrity hash, and the file count.
+
+## Loading on demand
+
+`cornerstone.loader.js` also re-exports the library's utilities, so it imports 17 chunks before it
+looks at the page: the animation catalogue (40 KB), the system and brand icon sets (40 KB), the
+localizer, the English strings and the autoloader. Linked from every page, that is about 104 KB of
+JavaScript on a page with no component.
+
+So the head tags link only the gem's module. It imports the loader the first time the page has a
+`cs-*` element or an element with `data-cs-preload`: when the page starts, when one is inserted (a
+Turbo Drive render, a frame load, a Turbo Stream, any script; a `MutationObserver` watches until the
+library is loaded), or when Turbo Drive is about to render one. From then on the loader registers
+each element as it appears, as before. A page that creates `cs-*` elements inside its own shadow
+roots, where the observer cannot see them, can import `loadCornerstone` from the gem's module and call
+it, or set `eager: true`.
+
+Measured in the dummy app, headless Chrome, empty cache, requests and bytes under `/cornerstone/`
+(bytes as sent, and uncompressed):
+
+| Page | Before | After |
+| --- | --- | --- |
+| no components (`/plain`) | 41 requests (20 JS, 21 CSS), 321 KB | 22 requests (1 JS, 21 CSS), 29 KB (220 KB uncompressed) |
+| `cs-split-panel` and `cs-tree` (`/tree`) | 86 requests, 481 KB | 85 requests, 90 KB (482 KB uncompressed) |
+
+The 21 CSS requests are `cornerstone.css` and the files it imports. `native: false` drops
+`native.css` (37 KB).
 
 ## Turbo
 
 ### Drive
 
 Turbo Drive swaps in the new `<body>` before the components in it are registered, so they paint
-unstyled for a frame or two. The gem's Turbo handling calls Cornerstone's `preventTurboFouce()`, which
-holds each render until the incoming body's components are registered, for two seconds at most. A
-system test checks that a component first used on the second page is registered when Turbo renders
-it. `cs-cloak` covers the first load, which Turbo is not involved in.
+unstyled for a frame or two. The gem holds each render whose incoming body has a `cs-*` element
+until those components are registered, for two seconds at most, loading the library first if the
+page did not need it before. This is what Cornerstone's `preventTurboFouce()` does, except that a
+render with no `cs-*` element is not held. System tests check that a component first used on the
+second page is registered when Turbo renders it, also when the first page had no component.
+`cs-cloak` covers the first load, which Turbo is not involved in.
 
 ### Morph refreshes
 
@@ -216,7 +275,8 @@ What the rule does not cover:
 - Pages restored from Turbo's cache are clones of an earlier live page, so their recorded attributes
   include the component-written ones. A morph right after a restore can apply less than it should.
 
-Turn the handling off with `config.cornerstone.turbo = false`; the Drive part goes with it.
+Turn the handling off with `config.cornerstone.turbo = false`; the Drive part goes with it. The gem's
+module still loads, for the loading on demand, with `?turbo=0` in its URL.
 
 ## Stimulus
 
@@ -260,7 +320,31 @@ child. Checkboxes, switches, radios and buttons also match their own text. Each 
 Capybara's finders do, for the element to be registered. They need a driver that can enter shadow
 roots: Selenium with Capybara 3.37 or later.
 
-There are no RSpec matchers yet. Use `expect(cs_field_value("Email")).to eq("…")`.
+For `cs-tree` and `cs-split-panel`:
+
+```ruby
+cs_expand_tree_item "Photos"                        # clicks the expand button; nothing if open
+cs_collapse_tree_item "Documents"
+cs_select_tree_item "beach.jpg"                     # clicks the label; nothing if selected
+assert_cs_tree_item "Photos", expanded: true        # waits, then raises Capybara::ExpectationNotMet
+assert_cs_tree_item "beach.jpg", selected: true, expanded: false
+has_cs_tree_item?("Photos", expanded: true)         # true or false, for RSpec's expect
+cs_find_tree_item("Photos")                         # the cs-tree-item element
+
+cs_set_split_panel_position 30                      # percent; the panel emits cs-reposition
+cs_set_split_panel_position 30, "sidebar"           # by id or aria-label when there are several
+cs_split_panel_position                             # => 30.0
+```
+
+A tree item's locator is its `id`, its `aria-label`, or its label text: a text node directly inside
+the item, or an element in its label whose whole text is the locator (`<a>Ohio Valley</a>` matches
+"Ohio Valley"). Text inside a nested item belongs to that item. An item in a closed branch is not
+visible, so expand the branch first or pass `visible: :all`. What a selecting click does depends on
+the tree's `selection`: in `leaf` mode a click on a branch opens or closes it, and in the multiple
+modes it toggles. `cs_select_tree_item` clicks with Selenium's action API, so it needs Selenium.
+
+There are no RSpec matchers yet. Use `expect(cs_field_value("Email")).to eq("…")`, or
+`assert_cs_tree_item`, which raises the same error as Capybara's `assert_selector`.
 
 ## Versioning and updating
 
@@ -269,7 +353,7 @@ one version number through a changesets `fixed` group. The gem follows that numb
 release, from `packages/rails`,
 
 ```sh
-VERSION=0.7.0 bundle exec rake cornerstone:vendor   # downloads the tarball, checks its integrity
+VERSION=0.7.0 bundle exec rake cornerstone:vendor   # downloads the tarball, checks its integrity, compresses
 # then set VERSION in lib/cornerstone_rails/version.rb
 bundle exec rake test
 ```
@@ -283,12 +367,13 @@ A test fails when `lib/cornerstone_rails/version.rb` and `packages/components/pa
 ## Developing
 
 Ruby 3.4.9 (see `.ruby-version`). Tests use a dummy app in `test/dummy` with Propshaft and
-turbo-rails.
+turbo-rails. The `brotli` gem in the Gemfile is for `rake cornerstone:compress` and the tests; the gem
+itself does not depend on it.
 
 ```sh
 bundle install
 bundle exec rake test          # helpers, generator, served files, vendored files
-bundle exec rake test:system   # headless Chrome: rendering, Drive, form helpers, morph
+bundle exec rake test:system   # headless Chrome: rendering, loading, Drive, test helpers, morph
 ```
 
 ## Known gaps
@@ -298,6 +383,9 @@ bundle exec rake test:system   # headless Chrome: rendering, Drive, form helpers
 - No RSpec matchers.
 - The morph handling is the gem's own rule, not something Cornerstone Components or Turbo provide.
   See the limits above.
+- `cornerstone.css` reaches its rules through 20 nested `@import`s, one request each. Flattening them
+  into one file at vendor time would remove most of the CSS requests.
+- The gem's own module is not precompressed (it is about 7 KB).
 - Icons still come from the jsDelivr CDN by default. `setIconPath` for self-hosted icons is not
   wired up.
 - `cornerstone.all.js` is not vendored. An app that wants one file through Propshaft still copies

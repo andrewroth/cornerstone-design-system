@@ -1,0 +1,23 @@
+<h1>Tree</h1>
+<%= cs_split_panel id: "split", position: 30 do %>
+  <div slot="start">
+    <%= cs_tree id: "tree", selection: :single do %>
+      <%= cs_tree_item "Documents", id: "documents", expanded: true do %>
+        <%= cs_tree_item "notes.txt", id: "notes" %>
+        <%= cs_tree_item "Photos", id: "photos" do %>
+          <%= cs_tree_item "beach.jpg", id: "beach" %>
+        <% end %>
+      <% end %>
+      <%= cs_tree_item id: "music" do %>
+        <span class="row"><a href="#music">Bob's music</a> <small>3 files</small></span>
+        <%= cs_tree_item "track.mp3", id: "track" %>
+      <% end %>
+    <% end %>
+  </div>
+  <div slot="end"><p id="detail">Detail</p></div>
+<% end %>
+<script type="module">
+  document.getElementById("split").addEventListener("cs-reposition", event => {
+    window.repositions = (window.repositions || 0) + 1;
+  });
+</script>

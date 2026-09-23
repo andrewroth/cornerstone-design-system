@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "cornerstone_rails/vendor"
+require "zlib"
 
 class VendorTest < ActiveSupport::TestCase
   MANIFEST = JSON.parse(File.read(File.join(CornerstoneRails::VENDOR_DIR, "manifest.json")))
@@ -19,9 +20,33 @@ class VendorTest < ActiveSupport::TestCase
                  "Run `VERSION=<new> bundle exec rake cornerstone:vendor` and bump lib/cornerstone_rails/version.rb"
   end
 
+  FILES = Dir.glob("**/*", base: CornerstoneRails::VENDOR_DIR).reject { |f| File.directory?(File.join(CornerstoneRails::VENDOR_DIR, f)) }
+
   test "the manifest matches what is on disk" do
-    files = Dir.glob("**/*", base: CornerstoneRails::VENDOR_DIR).reject { |f| f == "manifest.json" || File.directory?(File.join(CornerstoneRails::VENDOR_DIR, f)) }
+    files = FILES.reject { |f| f == "manifest.json" || f.end_with?(".br", ".gz") }
     assert_equal MANIFEST["files"], files.size
+  end
+
+  test "every .js and .css file has current brotli and gzip copies, where they are smaller" do
+    require "brotli"
+    sources = FILES.select { |f| f.end_with?(".js", ".css") }
+    stale = []
+    missing = []
+    sources.each do |f|
+      data = File.binread(File.join(CornerstoneRails::VENDOR_DIR, f))
+      { ".br" => ->(b) { Brotli.inflate(b) }, ".gz" => ->(b) { Zlib.gunzip(b) } }.each do |extension, inflate|
+        copy = File.join(CornerstoneRails::VENDOR_DIR, f + extension)
+        if File.exist?(copy)
+          stale << f + extension unless inflate.call(File.binread(copy)) == data
+        elsif data.bytesize > 1024
+          missing << f + extension
+        end
+      end
+    end
+    assert_empty stale, "Run `bundle exec rake cornerstone:compress`"
+    assert_empty missing, "Run `bundle exec rake cornerstone:compress`"
+    orphans = FILES.select { |f| f.end_with?(".br", ".gz") && !File.exist?(File.join(CornerstoneRails::VENDOR_DIR, f.delete_suffix(File.extname(f)))) }
+    assert_empty orphans
   end
 
   test "only browser-loaded files are kept" do

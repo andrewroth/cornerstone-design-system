@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "brotli"
+require "zlib"
 
 class StaticTest < ActionDispatch::IntegrationTest
   BASE = "/cornerstone/#{CornerstoneRails::COMPONENTS_VERSION}".freeze
@@ -59,6 +61,39 @@ class StaticTest < ActionDispatch::IntegrationTest
 
     post "#{BASE}/cornerstone.loader.js"
     assert_response :method_not_allowed
+  end
+
+  test "sends the brotli or gzip copy when the browser accepts it, and the file as is otherwise" do
+    path = "#{BASE}/styles/color/variants/cru.css"
+    original = File.binread(File.join(CornerstoneRails::VENDOR_DIR, "styles/color/variants/cru.css"))
+
+    get path, headers: { "Accept-Encoding" => "gzip, deflate, br, zstd" }
+    assert_response :ok
+    assert_equal "br", response.headers["content-encoding"]
+    assert_equal "text/css", response.media_type
+    assert_equal "accept-encoding", response.headers["vary"]
+    assert_equal "public, max-age=31536000, immutable", response.headers["cache-control"]
+    assert_equal original, Brotli.inflate(response.body)
+    assert_operator response.body.bytesize, :<, original.bytesize / 5
+
+    get path, headers: { "Accept-Encoding" => "gzip" }
+    assert_equal "gzip", response.headers["content-encoding"]
+    assert_equal original, Zlib.gunzip(response.body)
+
+    get path, headers: { "Accept-Encoding" => "br;q=0, gzip;q=0" }
+    assert_nil response.headers["content-encoding"]
+    assert_equal "accept-encoding", response.headers["vary"]
+    assert_equal original, response.body
+
+    get path
+    assert_nil response.headers["content-encoding"]
+    assert_equal original, response.body
+  end
+
+  test "a JavaScript module keeps its content type when compressed" do
+    get "#{BASE}/cornerstone.loader.js", headers: { "Accept-Encoding" => "gzip" }
+    assert_equal "gzip", response.headers["content-encoding"]
+    assert_equal "text/javascript", response.media_type
   end
 
   test "HEAD returns headers without a body" do

@@ -12,3 +12,6 @@ gem "puma"
 gem "minitest", "~> 5.25"
 gem "capybara"
 gem "selenium-webdriver"
+
+# Precompresses the vendored files in `rake cornerstone:vendor`. Not needed at runtime.
+gem "brotli"

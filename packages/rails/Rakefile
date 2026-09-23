@@ -16,6 +16,13 @@ namespace :cornerstone do
       destination: VENDOR_DIR,
       tarball: ENV["TARBALL"]
     ).call
+    Rake::Task["cornerstone:compress"].invoke
+  end
+
+  desc "Write .br and .gz copies of the vendored .js and .css files (run by cornerstone:vendor)"
+  task :compress do
+    require_relative "lib/cornerstone_rails/compressor"
+    CornerstoneRails::Compressor.new(VENDOR_DIR).call
   end
 end
 

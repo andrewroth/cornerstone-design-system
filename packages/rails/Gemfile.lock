@@ -87,6 +87,7 @@ GEM
       public_suffix (>= 2.0.2, < 8.0)
     base64 (0.3.0)
     bigdecimal (4.1.2)
+    brotli (0.8.0)
     builder (3.3.0)
     capybara (3.40.0)
       addressable
@@ -235,6 +236,7 @@ PLATFORMS
   x86_64-linux-gnu
 
 DEPENDENCIES
+  brotli
   capybara
   cornerstone-rails!
   minitest (~> 5.25)

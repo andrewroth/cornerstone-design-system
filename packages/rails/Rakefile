@@ -1,0 +1,34 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+require "rake/testtask"
+require_relative "lib/cornerstone_rails/version"
+
+VENDOR_DIR = File.expand_path("vendor/cornerstone", __dir__)
+
+namespace :cornerstone do
+  desc "Copy the runtime files of @cruglobal/cornerstone-components into vendor/cornerstone " \
+       "(VERSION defaults to CornerstoneRails::COMPONENTS_VERSION; TARBALL= uses a local .tgz)"
+  task :vendor do
+    require_relative "lib/cornerstone_rails/vendor"
+    CornerstoneRails::Vendor.new(
+      version: ENV.fetch("VERSION", CornerstoneRails::COMPONENTS_VERSION),
+      destination: VENDOR_DIR,
+      tarball: ENV["TARBALL"]
+    ).call
+  end
+end
+
+Rake::TestTask.new(:test) do |t|
+  t.libs << "test"
+  t.test_files = FileList["test/**/*_test.rb"].exclude("test/system/**/*")
+  t.warning = false
+end
+
+Rake::TestTask.new("test:system") do |t|
+  t.libs << "test"
+  t.pattern = "test/system/**/*_test.rb"
+  t.warning = false
+end
+
+task default: :test

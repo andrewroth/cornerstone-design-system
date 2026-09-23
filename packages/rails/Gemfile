@@ -1,0 +1,14 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "rake"
+gem "rails", "~> 8.1"
+gem "propshaft"
+gem "turbo-rails"
+gem "puma"
+gem "minitest", "~> 5.25"
+gem "capybara"
+gem "selenium-webdriver"

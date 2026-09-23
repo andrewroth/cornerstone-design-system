@@ -14,7 +14,7 @@ from git.
 
 ```ruby
 # Gemfile
-gem "cornerstone-rails", github: "andrewroth/cornerstone-private", branch: "rails", glob: "packages/rails/*.gemspec"
+gem "cornerstone-rails", github: "andrewroth/cornerstone-design-system", branch: "rails", glob: "packages/rails/*.gemspec"
 ```
 
 `glob:` is needed because the gemspec is not at the repository root. To develop against a local clone

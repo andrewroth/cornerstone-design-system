@@ -1,0 +1,15 @@
+<form action="<%= echo_path %>" method="get" data-turbo="false">
+  <%= cs_tag :input, label: "Full name", name: "full_name" %>
+  <%= cs_tag :textarea, name: "notes" do %><span slot="label">Notes</span><% end %>
+  <%= cs_tag :select, label: "Country", name: "country" do %>
+    <%= cs_tag :option, "Canada", value: "ca" %>
+    <%= cs_tag :option, "Mexico", value: "mx" %>
+  <% end %>
+  <%= cs_tag :checkbox, "I agree", name: "agree", value: "yes" %>
+  <%= cs_tag :switch, "Email me", name: "subscribe", value: "on", checked: true %>
+  <%= cs_tag :radio_group, label: "Plan", name: "plan" do %>
+    <%= cs_tag :radio, "Monthly", value: "monthly" %>
+    <%= cs_tag :radio, "Yearly", value: "yearly" %>
+  <% end %>
+  <%= cs_button "Send", type: :submit, variant: :brand %>
+</form>

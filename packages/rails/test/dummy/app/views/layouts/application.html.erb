@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html class="<%= cornerstone_html_class %>">
+  <head>
+    <title>cornerstone-rails dummy</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= yield :head %>
+    <%= javascript_include_tag "turbo.min", type: "module" %>
+    <%= cornerstone_head_tags turbo: params[:turbo] != "0" %>
+  </head>
+  <body>
+    <%= yield %>
+  </body>
+</html>

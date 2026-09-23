@@ -1,0 +1,9 @@
+<% content_for :head do %>
+  <meta name="turbo-refresh-method" content="morph">
+  <meta name="turbo-refresh-scroll" content="preserve">
+<% end %>
+<p id="render">render <%= @render %></p>
+<%= cs_dialog "Dialog body", id: "dialog", label: "A dialog" %>
+<%= cs_tag :checkbox, "Remember me", id: "remember", name: "remember" %>
+<%= cs_tag :input, id: "name", label: "Name", name: "name", placeholder: "render #{@render}" %>
+<%= cs_button "Server-disabled", id: "server-disabled", disabled: @render == 1 %>
